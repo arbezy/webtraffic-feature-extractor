@@ -16,13 +16,12 @@ from statistics import mean
 
 
 # Number of packets to use when extracting features, i.e. k=40 == use the first 40 packets.
-k = 40
+# k = 40
 
 # NEED TO SUPPLY THIS PROGRAM WITH TWO ARGUMENTS (DIRECTORY, quic/tcp)
 
 def main():  
-    for i in range(5, 45, 5):
-        k = i
+    for k in range(200, 201, 5):
         no_of_cols = 1 + 8 + ((1460)*2) + (k*2) + (1*7)
         trace_df = pd.DataFrame(columns=list(range(no_of_cols)))
         counter = 1
@@ -30,7 +29,7 @@ def main():
             if f.endswith('.csv'):
                 fname = os.path.join(sys.argv[1], f)
                 current_capture = pd.read_csv(f"{fname}", sep='\t')
-                print(f"{i}:{counter}->{f}:")
+                print(f"{k}:{counter}->{f}:")
                 
                 if is_quic:
                     print("IS QUIC")
@@ -43,7 +42,7 @@ def main():
                     current_capture = filter_out_irrelevant_pkts_tcp(current_capture)
                     current_capture = remove_tcp_handshake(current_capture)
                     
-                simple = simple_features(current_capture)
+                simple = simple_features(current_capture, k)
                 # k = the number of packets to use in relevant transfer features = 40 (early traffic scenario)
                 t_features = transfer_features(current_capture, simple, k)
                 
@@ -100,7 +99,6 @@ def label_quic_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = ["time_frame_epoch", "src_ip", "dst_ip", "src_port", "dst_port", "src_port(TCP)", "dst_port(TCP)", "proto", "ip_len", "ip_hdr_len", "udp_len", "data_len", "time_delta", "time_relative", "udp_stream", "expert_msg", "change_cipher_spec", "seq_num"]
     return df
         
-# TODO: need to change this to the correct columns
 def label_tcp_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df = df.assign(e=pd.Series(range(1, len(df)+1)).values)
     # NOTE: outdated col headers!
@@ -111,12 +109,11 @@ def label_tcp_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     
 # SIMPLE FEATURES:
 
-def simple_features(capture_df: pd.DataFrame):
+def simple_features(capture_df: pd.DataFrame, k: int):
     simple_features_results = {s1+s2:0 for s1 in ["positive", "negative"] for s2 in ["tiny", "small", "medium", "large"]}
     i = 0
     for index, row in capture_df.iterrows():
         if i < k:
-            # TODO: find out which col src and dst point are in after parsing
             src_port = int(row.src_port)
             dst_port = int(row.dst_port)
             pkt_size = int(row.data_len)
@@ -153,19 +150,19 @@ def get_pkt_size_classification(pkt_size: bytes) -> str:
 def transfer_features(df: pd.DataFrame, simple_features, k: int):
     # TODO: Could combine this upper and lower code to make a but more concise
     
-    unique_pkt_size = unique_packet_size(df) # 1460d
+    unique_pkt_size = unique_packet_size(df, k) # 1460d
     #print(f"unique pkt size = {len(unique_pkt_size)}dim")
-    pkt_size_counts = pkt_size_count(df) # 1460d
+    pkt_size_counts = pkt_size_count(df, k) # 1460d
     #print(f"pkt size counts = {len(pkt_size_counts)}dim")
     ordered_pkt_lengths = packet_order(df, k) # kd
     #print(f"ordered pkt lengths = {len(ordered_pkt_lengths)}dim")
     ita_time = interarrival_time(df, k) # kd
     #print(f"ita time = {len(ita_time)}dim")
     negative_pkts = neg_pkts(simple_features) # 1d
-    cum_sum = cumulative_size(df) # 1d
-    cum_sum_w_direction = cumulative_size_w_direction(df) # 1d
-    bursts, max_burst, mean_burst = burst_features(df) # 1d, 1d, 1d
-    ttl_trans_time = total_transmission_time(df) # 1d
+    cum_sum = cumulative_size(df, k) # 1d
+    cum_sum_w_direction = cumulative_size_w_direction(df, k) # 1d
+    bursts, max_burst, mean_burst = burst_features(df, k) # 1d, 1d, 1d
+    ttl_trans_time = total_transmission_time(df, k) # 1d
     
     trace_transfer_features = []
     trace_transfer_features += unique_pkt_size
@@ -190,7 +187,7 @@ from 54 to 1514).
 
 replaced this range with 56 -> 1894 which is my actual range of pkt lengths, meaning it is a 1838-dimension vector
 """
-def unique_packet_size(df: pd.DataFrame):
+def unique_packet_size(df: pd.DataFrame, k:int):
     smallest_pkt_size = 56
     largest_pkt_size = 1516
     unique_packet_sizes = [0 for i in range((largest_pkt_size - smallest_pkt_size) + 1)]
@@ -209,7 +206,7 @@ length 𝑙 in the traffic 𝑇 . Specifically, if 𝑙 ∈ {Length(𝑡𝑖)|�
 dimension of this feature is set to Card({𝑡𝑖|𝑡𝑖 ∈ 𝑇 , Length(𝑡𝑖) = 𝑙}).
 This feature is a 1460-dimension vector.
 """
-def pkt_size_count(df: pd.DataFrame):
+def pkt_size_count(df: pd.DataFrame, k: int):
     # TODO: change pkt size range
     smallest_pkt_size = 56
     largest_pkt_size = 1516
@@ -273,7 +270,7 @@ where 𝑇𝑝 = {Length((𝑡𝑖, 𝑑𝑖))|𝑡𝑖 ∈ 𝑇 , 𝑑𝑖 = po
 
 THIS IS SUPER MISLEADING IN THE PAPER, CUMULATIVE SIZE IS JUST TOTAL SIZE AS IT IS 1 DIMENSION i.e. THE SUM
 """
-def cumulative_size(df: pd.DataFrame):
+def cumulative_size(df: pd.DataFrame, k:int):
     # This would return the cumulative sum as a k-dim feature, except it is not actually cumulative bc of their strange def.
     return df['data_len'][:k].sum()
 
@@ -283,7 +280,7 @@ direction 𝑑 is considered. This 1-dimension feature is set to
 ∑{𝑇𝑝, 𝑇𝑛}, where 𝑇𝑝 = {Length((𝑡𝑖, 𝑑𝑖))|𝑡𝑖 ∈ 𝑇 , 𝑑𝑖 = positive}, 𝑇𝑛 =
 {−Length((𝑡𝑖, 𝑑𝑖))|𝑡𝑖 ∈ 𝑇 , 𝑑𝑖 = negative}.
 """
-def cumulative_size_w_direction(df: pd.DataFrame):
+def cumulative_size_w_direction(df: pd.DataFrame, k: int):
     cumulative_sum = 0
     i = 0
     for index, row in df.iterrows():
@@ -311,7 +308,7 @@ in that original paper they just use burst size not all this extra stuff.
 
 On a serious note it doesn't make sense to use these extra 2 features as the max is already available in the list and the mean is already implicitly available...
 """
-def burst_features(df: pd.DataFrame):
+def burst_features(df: pd.DataFrame, k:int):
     # TODO: Need to initialise these correctly so the first burst is != 0
     first_pkt = df.iloc[0]
     if first_pkt.dst_port == 2020:
@@ -349,7 +346,7 @@ def burst_features(df: pd.DataFrame):
 mission time of traffic 𝑇 . This 1-dimension feature is set to
 ∑{Time(𝑡𝑖) − Time(𝑡𝑖−1)|𝑡𝑖 ∈ 𝑇 , 𝑖 > 1}
 """
-def total_transmission_time(df: pd.DataFrame):
+def total_transmission_time(df: pd.DataFrame, k:int):
     # think here I can just get the time stamp of the final packet
     if len(df) >= k:
         final_elem = df.iloc[k-1]
