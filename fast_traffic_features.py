@@ -15,11 +15,14 @@ from statistics import mean
 
 import math
 
-import threading
+import multiprocessing
+
+from time import sleep
+# should make this multi process not thread!!!
 
 def main():
     # change this to match computer cores for max speeeeeed
-    N_THREADS = 4
+    N_THREADS = 8
     val_range = range(40, 196, 5)
     n = len(val_range)
     chunk_size = math.floor(n / N_THREADS)
@@ -37,23 +40,29 @@ def main():
         thread_range = val_range[chunk_sizes_cumulative[i] : chunk_sizes_cumulative[i+1]]
         start_ind = thread_range[0]
         end_ind = thread_range[-1]
-        threads.append(threading.Thread(target=main_thread, args=(start_ind, end_ind)))
+        threads.append(multiprocessing.Process(target=main_thread, args=(start_ind, end_ind)))
     
     for t in threads:
         t.start()
+        sleep(5)
         
     for t in threads:
         t.join()
+        
+    print("threads joined")
     
 def main_thread(start: int, stop: int):
+    print(f"thread for {start}->{stop} started")
     for k in range(start, stop+5, 5):
         no_of_cols = 1 + 8 + ((1460)*2) + (k*2) + (1*7)
         trace_df = pd.DataFrame(columns=list(range(no_of_cols)))
         counter = 1
         for f in os.listdir(sys.argv[1]):
+            if counter % 1000 == 0:
+                print(f"thread({start},{stop}) has reached {counter}")
             if f.endswith('.csv'):
                 fname = os.path.join(sys.argv[1], f)
-                current_capture = pd.read_csv(f"{fname}", sep='\t')
+                current_capture = pd.read_csv(f"{fname}", sep='\t', dtype={18: str})
                 #print(f"{k}:{counter}->{f}:")
                 
                 if is_quic:
@@ -139,7 +148,7 @@ def get_features(capture_df: pd.DataFrame, k: int):
     burst_sizes = []
 
     i = 0
-    for index, row in capture_df.iterrows():
+    for index, row in capture_df[:k+20].iterrows():
         if i < k:
             # SIMPLE FEATURES
             src_port = int(row.src_port)
@@ -241,4 +250,6 @@ def get_pkt_size_classification(pkt_size: bytes) -> str:
 is_quic = False
 if sys.argv[2] == "quic":
     is_quic = True  
-main()
+
+if __name__ == '__main__':
+    main()
